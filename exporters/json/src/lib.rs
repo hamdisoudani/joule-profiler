@@ -99,7 +99,6 @@ pub struct JsonExporter {
 
     shape: Shape,
 
-    /// The phases so far, for [`Shape::Document`].
     document: Document,
 }
 
@@ -129,7 +128,6 @@ impl JsonExporter {
 
         self.out.write_all(b"\n")?;
         self.out.flush()?;
-        println!("JSON written to: {}", self.path.display());
         Ok(())
     }
 }
@@ -184,13 +182,14 @@ impl Exporter for JsonExporter {
     /// A document is written only here, so a failed run leaves the file empty.
     fn finish(&mut self, summary: &Summary) -> Result<()> {
         if self.shape == Shape::Lines {
-            return self.write(&Line::Summary { summary });
+            self.write(&Line::Summary { summary })?;
+        } else {
+            self.document.summary = Some(*summary);
+            let document = std::mem::take(&mut self.document);
+            self.write(&document)?;
         }
-
-        self.document.summary = Some(*summary);
-
-        let document = std::mem::take(&mut self.document);
-        self.write(&document)
+        println!("JSON written to: {}", self.path.display());
+        Ok(())
     }
 }
 

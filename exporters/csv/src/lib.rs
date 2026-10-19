@@ -86,7 +86,6 @@ impl Exporter for CsvExporter {
     fn export(&mut self, phase: &PhaseInfo, sources: &[SourceMetrics<'_>]) -> Result<()> {
         self.start()?;
 
-        // Formatted once per phase, not once per row.
         let index = phase.index.to_string();
         let name = phase.name();
         let start_line = line(phase.start_line);

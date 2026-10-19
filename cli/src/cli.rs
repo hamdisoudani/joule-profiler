@@ -180,7 +180,7 @@ pub enum OutputFormat {
     /// Human-readable, as the run goes.
     Terminal,
 
-    /// JSON, one document for the run or one object per line. (see `[exporter] lines`)
+    /// JSON, one document for the run or one object per line. (see `lines` in `[exporter]`)
     Json,
 
     /// One row per metric.

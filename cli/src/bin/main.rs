@@ -40,7 +40,7 @@ fn main() -> Result<()> {
                 .use_root(config_table.use_root)
                 .output_file(config_table.stdout_file.clone());
 
-            exporter::set(&mut joule_profiler, &config_table)?;
+            exporter::set_exporter(&mut joule_profiler, &config_table.exporter)?;
             joule_profiler.set_injector(injector);
             joule_profiler.set_defer(config_table.defer);
 
