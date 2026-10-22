@@ -49,6 +49,7 @@ use_root = false
 #name = "joule-profiler-run"     # default: joule-profiler-<pid>
 #controllers = ["cpu", "memory", "io"] # the default
 #attach = true                   # moves the program into it
+#freeze = false                  # frozen before the program starts, thawed once the sources are ready
 
 # RAPL
 [sources.rapl]

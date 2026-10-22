@@ -13,6 +13,7 @@ pub const ROOT: &str = "/sys/fs/cgroup";
 const PROCS: &str = "cgroup.procs";
 const CONTROLLERS: &str = "cgroup.controllers";
 const SUBTREE: &str = "cgroup.subtree_control";
+const FREEZE: &str = "cgroup.freeze";
 
 /// The controllers a run cgroup gets when none are configured.
 const RUN_CONTROLLERS: [&str; 3] = ["cpu", "memory", "io"];
@@ -78,26 +79,32 @@ impl Cgroup {
     }
 
     pub fn controllers(&self) -> io::Result<Vec<String>> {
-        Ok(words(&self.path.join(CONTROLLERS))?.unwrap_or_default())
+        Ok(split_words(&self.path.join(CONTROLLERS))?.unwrap_or_default())
     }
 
     /// The controllers enabled for its children.
     pub fn handed_down(&self) -> io::Result<Vec<String>> {
-        Ok(words(&self.path.join(SUBTREE))?.unwrap_or_default())
+        Ok(split_words(&self.path.join(SUBTREE))?.unwrap_or_default())
     }
 
     /// Enables `controller` for its children.
-    pub fn hand_down(&self, controller: &str) -> io::Result<()> {
-        self.subtree(&format!("+{controller}"))
+    pub fn enable_controller(&self, controller: &str) -> io::Result<()> {
+        self.write_subtree(&format!("+{controller}"))
     }
 
     /// Disables `controller` for its children.
-    pub fn take_back(&self, controller: &str) -> io::Result<()> {
-        self.subtree(&format!("-{controller}"))
+    pub fn disable_controller(&self, controller: &str) -> io::Result<()> {
+        self.write_subtree(&format!("-{controller}"))
     }
 
-    fn subtree(&self, change: &str) -> io::Result<()> {
-        fs::write(self.path.join(SUBTREE), change)
+    fn write_subtree(&self, content: &str) -> io::Result<()> {
+        fs::write(self.path.join(SUBTREE), content)
+    }
+
+    /// Freezes or thaws every process in it. Freezing is not immediate: `frozen` in
+    /// `cgroup.events` says when it is done.
+    pub fn set_frozen(&self, frozen: bool) -> io::Result<()> {
+        fs::write(self.path.join(FREEZE), if frozen { "1" } else { "0" })
     }
 
     /// A file holding a single number, such as `memory.current`. `None` if it does not exist.
@@ -108,7 +115,7 @@ impl Cgroup {
     }
 
     /// A `key value` file, such as `cpu.stat`. Empty if it does not exist.
-    pub fn keyed(&self, file: &str) -> io::Result<HashMap<String, u64>> {
+    pub fn read_keyed(&self, file: &str) -> io::Result<HashMap<String, u64>> {
         let Some(content) = self.read(file)? else {
             return Ok(HashMap::new());
         };
@@ -129,16 +136,6 @@ impl Cgroup {
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
             Err(error) => Err(error),
         }
-    }
-}
-
-fn words(path: &Path) -> io::Result<Option<Vec<String>>> {
-    match fs::read_to_string(path) {
-        Ok(content) => Ok(Some(
-            content.split_whitespace().map(ToOwned::to_owned).collect(),
-        )),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(error),
     }
 }
 
@@ -179,6 +176,13 @@ pub enum CgroupError {
         #[source]
         error: io::Error,
     },
+
+    #[error("freezing {path}: this needs Linux 5.2, and root or a delegated subtree")]
+    Freeze {
+        path: PathBuf,
+        #[source]
+        error: io::Error,
+    },
 }
 
 /// The cgroup made for a run: both the builder and the `[cgroup]` table.
@@ -189,6 +193,7 @@ pub struct CgroupConfig {
     name: String,
     controllers: Option<Vec<String>>,
     attach: bool,
+    freeze: bool,
 }
 
 impl Default for CgroupConfig {
@@ -198,6 +203,7 @@ impl Default for CgroupConfig {
             name: format!("joule-profiler-{}", std::process::id()),
             controllers: None,
             attach: true,
+            freeze: false,
         }
     }
 }
@@ -217,15 +223,22 @@ impl CgroupConfig {
         self
     }
 
-    /// Controllers that must be enabled. Fails if one is not available.
+    /// Controllers that must be enabled..
     pub fn controllers(mut self, controllers: impl IntoIterator<Item = impl Into<String>>) -> Self {
         self.controllers = Some(controllers.into_iter().map(Into::into).collect());
         self
     }
 
-    /// Whether the profiled program is moved into it.
+    /// Whether the profiled program is moved into the cgroup.
     pub fn attach(mut self, attach: bool) -> Self {
         self.attach = attach;
+        self
+    }
+
+    /// Whether it is frozen before the program is started, and thawed once every source is
+    /// ready.
+    pub fn freeze(mut self, freeze: bool) -> Self {
+        self.freeze = freeze;
         self
     }
 
@@ -246,12 +259,13 @@ impl CgroupConfig {
         let handed_down = parent.handed_down().map_err(|e| read(SUBTREE, e))?;
 
         // Built first so that its `Drop` undoes any change if a later step fails.
-        let mut run = RunCgroup {
+        let mut run_cgroup = RunCgroup {
             cgroup: parent.child(&self.name),
             parent,
             attach: self.attach,
-            made: false,
-            handed: Vec::new(),
+            freeze: self.freeze,
+            created: false,
+            controllers: Vec::new(),
         };
 
         let required = self.controllers.is_some();
@@ -264,27 +278,30 @@ impl CgroupConfig {
                 continue;
             }
 
-            match run.hand_down(&controller, &available) {
-                Ok(()) => run.handed.push(controller),
+            match run_cgroup.enable_controller(&controller, &available) {
+                Ok(()) => run_cgroup.controllers.push(controller),
                 Err(error) if !required => log::warn!("{error}"),
                 Err(error) => return Err(error),
             }
         }
 
-        if run.cgroup.exists() {
+        if run_cgroup.cgroup.exists() {
             log::debug!(
                 "using the cgroup {}, which exists already",
-                run.path().display()
+                run_cgroup.path().display()
             );
         } else {
-            run.cgroup.create().map_err(|error| CgroupError::Create {
-                path: run.cgroup.path().to_path_buf(),
-                error,
-            })?;
-            run.made = true;
+            run_cgroup
+                .cgroup
+                .create()
+                .map_err(|error| CgroupError::Create {
+                    path: run_cgroup.cgroup.path().to_path_buf(),
+                    error,
+                })?;
+            run_cgroup.created = true;
         }
 
-        Ok(run)
+        Ok(run_cgroup)
     }
 }
 
@@ -294,8 +311,9 @@ pub struct RunCgroup {
     cgroup: Cgroup,
     parent: Cgroup,
     attach: bool,
-    made: bool,
-    handed: Vec<String>,
+    freeze: bool,
+    created: bool,
+    controllers: Vec<String>,
 }
 
 impl RunCgroup {
@@ -318,7 +336,31 @@ impl RunCgroup {
             })
     }
 
-    fn hand_down(&self, controller: &str, available: &[String]) -> Result<(), CgroupError> {
+    /// Freezes it before the program is started, unless `freeze` is false. The program is then
+    /// frozen as soon as it is moved in.
+    pub fn freeze(&self) -> Result<(), CgroupError> {
+        self.set_frozen(true)
+    }
+
+    /// Thaws it once every source is ready, unless `freeze` is false.
+    pub fn thaw(&self) -> Result<(), CgroupError> {
+        self.set_frozen(false)
+    }
+
+    fn set_frozen(&self, frozen: bool) -> Result<(), CgroupError> {
+        if !self.freeze {
+            return Ok(());
+        }
+
+        self.cgroup
+            .set_frozen(frozen)
+            .map_err(|error| CgroupError::Freeze {
+                path: self.cgroup.path().to_path_buf(),
+                error,
+            })
+    }
+
+    fn enable_controller(&self, controller: &str, available: &[String]) -> Result<(), CgroupError> {
         if !available.iter().any(|name| name == controller) {
             return Err(CgroupError::Unavailable {
                 controller: controller.to_owned(),
@@ -327,7 +369,7 @@ impl RunCgroup {
         }
 
         self.parent
-            .hand_down(controller)
+            .enable_controller(controller)
             .map_err(|error| CgroupError::HandDown {
                 controller: controller.to_owned(),
                 path: self.parent.path().to_path_buf(),
@@ -338,7 +380,12 @@ impl RunCgroup {
 
 impl Drop for RunCgroup {
     fn drop(&mut self) {
-        if self.made {
+        // A run that failed before the sources were ready leaves it frozen.
+        if let Err(error) = self.thaw() {
+            log::warn!("{error}");
+        }
+
+        if self.created {
             // The root is the only cgroup that can hold processes and enable controllers at once.
             self.cgroup.move_processes_to(&Cgroup::at(ROOT));
 
@@ -347,14 +394,24 @@ impl Drop for RunCgroup {
             }
         }
 
-        for controller in &self.handed {
-            if let Err(error) = self.parent.take_back(controller) {
+        for controller in &self.controllers {
+            if let Err(error) = self.parent.disable_controller(controller) {
                 log::warn!(
                     "taking the `{controller}` controller back from {} failed: {error}",
                     self.parent.path.display()
                 );
             }
         }
+    }
+}
+
+fn split_words(path: &Path) -> io::Result<Option<Vec<String>>> {
+    match fs::read_to_string(path) {
+        Ok(content) => Ok(Some(
+            content.split_whitespace().map(ToOwned::to_owned).collect(),
+        )),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
     }
 }
 
@@ -399,7 +456,7 @@ mod tests {
         )
         .unwrap();
 
-        let stat = cgroup.keyed("cpu.stat").unwrap();
+        let stat = cgroup.read_keyed("cpu.stat").unwrap();
 
         assert_eq!(stat.get("usage_usec"), Some(&42));
         assert_eq!(stat.get("user_usec"), Some(&30));
@@ -413,7 +470,7 @@ mod tests {
         let cgroup = fake("no-controller");
         cgroup.create().unwrap();
 
-        assert!(cgroup.keyed("memory.stat").unwrap().is_empty());
+        assert!(cgroup.read_keyed("memory.stat").unwrap().is_empty());
         assert_eq!(cgroup.read_u64("memory.current").unwrap(), None);
 
         fs::remove_dir_all(cgroup.path()).unwrap();
@@ -451,7 +508,7 @@ mod tests {
 
         assert!(run.path().is_dir());
         assert_eq!(
-            run.handed,
+            run.controllers,
             ["cpu"],
             "memory was handed down already, io is not there"
         );
@@ -500,6 +557,36 @@ mod tests {
         drop(run);
 
         assert!(parent.child("there").exists());
+        fs::remove_dir_all(parent.path()).unwrap();
+    }
+
+    #[test]
+    fn a_run_cgroup_is_frozen_only_when_asked_and_thawed_when_dropped() {
+        let parent = fake_parent("run-freeze", "", "");
+        let freeze = parent.child("a-run").path().join(FREEZE);
+
+        let run = CgroupConfig::new()
+            .parent(parent.path())
+            .name("a-run")
+            .create()
+            .unwrap();
+        run.freeze().unwrap();
+        assert!(!freeze.exists(), "not asked to freeze");
+        drop(run);
+
+        let mut run = CgroupConfig::new()
+            .parent(parent.path())
+            .name("a-run")
+            .freeze(true)
+            .create()
+            .unwrap();
+        run.freeze().unwrap();
+        assert_eq!(fs::read_to_string(&freeze).unwrap(), "1");
+
+        // Kept in place so that what `drop` wrote can be read.
+        run.created = false;
+        drop(run);
+        assert_eq!(fs::read_to_string(&freeze).unwrap(), "0");
         fs::remove_dir_all(parent.path()).unwrap();
     }
 

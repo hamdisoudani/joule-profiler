@@ -38,9 +38,10 @@ pub struct SourceMetrics<'a> {
 
 impl<'a> SourceMetrics<'a> {
     /// Blank metrics for every source, reused for every phase.
-    pub(crate) fn of_schema(schema: &'a Schema) -> Vec<Self> {
+    pub(crate) fn from_schema(schema: &'a Schema) -> Vec<Self> {
         let metric = |info: &'a MetricInfo| Metric {
             name: &info.name,
+            // values are filled with blank values for now, used to optimise memory allocations
             value: MetricValue::U64(0),
             unit: info.unit,
         };
@@ -95,7 +96,7 @@ mod tests {
                 },
             ],
         };
-        let mut sources = SourceMetrics::of_schema(&schema);
+        let mut sources = SourceMetrics::from_schema(&schema);
 
         for phase in 1..=2_u64 {
             let values = [

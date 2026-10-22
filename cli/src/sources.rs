@@ -17,7 +17,7 @@ use joule_profiler_source_rapl::Rapl;
 use toml::Value;
 
 use crate::cli::SourceName;
-use crate::config::{ConfigTable, configure};
+use crate::config::{ConfigTable, read_source_config};
 
 /// The cgroup source measures `cgroup` unless its table names another.
 #[cfg_attr(not(feature = "cgroup"), allow(unused_variables))]
@@ -27,7 +27,7 @@ pub fn add(
     cgroup: Option<&Path>,
 ) -> Result<()> {
     for name in config_table.sources.iter().copied() {
-        let mut table = config_table.table(name).cloned();
+        let mut table = config_table.get_source_table(name).cloned();
         let ignore = take_ignore(&mut table);
 
         #[cfg(feature = "cgroup")]
@@ -51,17 +51,17 @@ pub fn add(
 fn build(profiler: &mut JouleProfiler, name: SourceName, table: Option<&Value>) -> Result<()> {
     profiler.add_source(match name {
         #[cfg(feature = "rapl")]
-        SourceName::Rapl => configure::<Rapl>(name, table)?.build()?,
+        SourceName::Rapl => read_source_config::<Rapl>(name, table)?.build()?,
         #[cfg(feature = "perf_event")]
-        SourceName::Perf => configure::<PerfEvent>(name, table)?.build(),
+        SourceName::Perf => read_source_config::<PerfEvent>(name, table)?.build(),
         #[cfg(feature = "procfs")]
-        SourceName::Procfs => configure::<Procfs>(name, table)?.build()?,
+        SourceName::Procfs => read_source_config::<Procfs>(name, table)?.build()?,
         #[cfg(feature = "cgroup")]
-        SourceName::Cgroup => configure::<Cgroup>(name, table)?.build()?,
+        SourceName::Cgroup => read_source_config::<Cgroup>(name, table)?.build()?,
         #[cfg(feature = "nvml")]
-        SourceName::Nvml => configure::<Nvml>(name, table)?.build()?,
+        SourceName::Nvml => read_source_config::<Nvml>(name, table)?.build()?,
         #[cfg(feature = "amdsmi")]
-        SourceName::AmdSmi => configure::<AmdSmi>(name, table)?.build()?,
+        SourceName::AmdSmi => read_source_config::<AmdSmi>(name, table)?.build()?,
     });
 
     Ok(())

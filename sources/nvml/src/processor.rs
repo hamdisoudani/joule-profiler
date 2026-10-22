@@ -83,7 +83,7 @@ impl<H: NvmlHardware> Processor<NvmlSensor<H>> for NvmlProcessor {
         current: &Snapshot,
         values: &mut Vec<MetricValue>,
     ) -> Result<()> {
-        let mut next = |value: u64| values.push(MetricValue::U64(value));
+        let mut push = |value: u64| values.push(MetricValue::U64(value));
 
         let samples = self
             .devices
@@ -93,23 +93,23 @@ impl<H: NvmlHardware> Processor<NvmlSensor<H>> for NvmlProcessor {
 
         for ((device, current), previous) in samples {
             if device.support.intersects(DeviceSupport::ENERGY) {
-                next(energy(previous, current));
+                push(energy(previous, current));
             }
 
             if device.support.contains(DeviceSupport::Vram) {
                 let (low, high, mean) = current.vram.min_max_mean();
 
-                next(low);
-                next(high);
-                next(mean);
+                push(low);
+                push(high);
+                push(mean);
             }
 
             if device.support.contains(DeviceSupport::Utilization) {
                 let (low, high, mean) = current.utilization.min_max_mean();
 
-                next(low);
-                next(high);
-                next(mean);
+                push(low);
+                push(high);
+                push(mean);
             }
         }
 

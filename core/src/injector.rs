@@ -26,18 +26,34 @@ pub type StopHandle = Box<dyn Fn() -> Result<(), BoxError> + Send + Sync>;
 pub trait Injector: Send + 'static {
     type Error: std::error::Error + Send + Sync + 'static;
 
-    /// Starts the target paused until `resume`.
+    /// Starts the target and returns the process identifier.
     fn start(&mut self) -> Result<Target, Self::Error>;
 
-    fn stop_handle(&self) -> StopHandle;
+    /// Stops the injector during a profiling session, while blocking on [`Injector::next_phase`].
+    /// The default implementation is a stub doing nothing.
+    fn stop_handle(&self) -> StopHandle {
+        Box::new(|| {
+            log::debug!("using default implementation to stop the injector, doing nothing");
+            Ok(())
+        })
+    }
 
-    fn resume(&mut self) -> Result<(), Self::Error>;
+    /// Resumes the target or implement custom logic just after the beginning of the profiling.
+    /// The default implementation is a stub doing nothing.
+    fn resume(&mut self) -> Result<(), Self::Error> {
+        log::debug!("using default implementation to resume the injector, doing nothing");
+        Ok(())
+    }
 
     /// Blocks until the next boundary; `None` once the target is done.
     fn next_phase(&mut self) -> Result<Option<PhaseToken>, Self::Error>;
 
     /// Waits for the target to end and returns its exit code.
-    fn wait(&mut self) -> Result<Option<i32>, Self::Error>;
+    /// The default implementation is a stub doing nothing and returning `None`.
+    fn wait(&mut self) -> Result<Option<i32>, Self::Error> {
+        log::debug!("using default implementation to wait for the injector, doing nothing");
+        Ok(None)
+    }
 }
 
 /// Type-erased [`Injector`].

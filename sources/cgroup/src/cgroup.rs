@@ -42,7 +42,7 @@ impl Usage for Cgroup {
     fn memory_usage(&self) -> Result<[Option<u64>; MEMORY.len()]> {
         let read = |file: &str| self.read_u64(file).map_err(|e| failed(self, file, e));
         let stat = self
-            .keyed("memory.stat")
+            .read_keyed("memory.stat")
             .map_err(|e| failed(self, "memory.stat", e))?;
 
         Ok([
@@ -60,7 +60,7 @@ impl Usage for Cgroup {
 
     fn counters(&self) -> Result<[Option<u64>; COUNTERS.len()]> {
         let stat = self
-            .keyed("cpu.stat")
+            .read_keyed("cpu.stat")
             .map_err(|e| failed(self, "cpu.stat", e))?;
         let [read, written] = io_bytes(self)?;
 

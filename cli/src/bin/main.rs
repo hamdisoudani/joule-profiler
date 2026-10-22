@@ -11,7 +11,7 @@ fn main() -> Result<()> {
     let cli = Cli::parsed()?;
     init_logging(cli.verbose);
 
-    let config_table = ConfigTable::resolve(&cli)?;
+    let config_table = ConfigTable::load_from_cli(&cli)?;
     let profiling = matches!(cli.command, Command::Profile(_));
 
     let cgroup = config_table

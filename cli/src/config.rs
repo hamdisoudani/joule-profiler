@@ -61,15 +61,15 @@ pub struct ConfigTable {
 }
 
 impl ConfigTable {
-    pub fn resolve(cli: &Cli) -> Result<Self> {
-        let config_file = read(cli)?;
+    pub fn load_from_cli(cli: &Cli) -> Result<Self> {
+        let config_file = read_file_and_override(cli)?;
 
         let (pattern, defer) = match &cli.command {
             Command::Profile(args) => (args.token_pattern.clone(), args.defer),
             Command::ListSensors | Command::Info => (None, false),
         };
 
-        let sources = sources(cli, &config_file)?;
+        let sources = get_configured_sources(cli, &config_file)?;
 
         let cgroup = config_file.cgroup.or_else(|| {
             needs_run_cgroup(&sources, &config_file.sources).then(CgroupConfig::default)
@@ -95,13 +95,13 @@ impl ConfigTable {
         })
     }
 
-    pub fn table(&self, name: SourceName) -> Option<&Value> {
+    pub fn get_source_table(&self, name: SourceName) -> Option<&Value> {
         self.tables.get(name.key())
     }
 }
 
 /// The configuration file, with the `--define` overrides then the flags applied.
-fn read(cli: &Cli) -> Result<ConfigFile> {
+fn read_file_and_override(cli: &Cli) -> Result<ConfigFile> {
     let mut document = match &cli.config_file {
         Some(path) => {
             let content =
@@ -196,7 +196,7 @@ fn set_toml_value(raw: &str) -> Value {
 }
 
 /// The sources named by `--sources`, then those with a table in the file.
-fn sources(cli: &Cli, file: &ConfigFile) -> Result<Vec<SourceName>> {
+fn get_configured_sources(cli: &Cli, file: &ConfigFile) -> Result<Vec<SourceName>> {
     let mut sources = cli.sources.clone();
 
     for key in file.sources.keys() {
@@ -231,7 +231,10 @@ fn needs_run_cgroup(sources: &[SourceName], tables: &Table) -> bool {
 }
 
 /// Reads a source configuration from its table. No table means all defaults.
-pub fn configure<C: DeserializeOwned>(name: SourceName, table: Option<&Value>) -> Result<C> {
+pub fn read_source_config<C: DeserializeOwned>(
+    name: SourceName,
+    table: Option<&Value>,
+) -> Result<C> {
     table
         .cloned()
         .unwrap_or_else(|| Value::Table(Table::new()))
@@ -349,9 +352,10 @@ mod tests {
 
     #[test]
     fn a_cgroup_table_is_the_cgroup_made_for_the_run() {
-        let file: ConfigFile = document("[cgroup]\nname = \"a-run\"\nattach = false")
-            .try_into()
-            .expect("reads");
+        let file: ConfigFile =
+            document("[cgroup]\nname = \"a-run\"\nattach = false\nfreeze = true")
+                .try_into()
+                .expect("reads");
 
         assert!(file.cgroup.is_some());
         assert!(

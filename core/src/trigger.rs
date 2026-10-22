@@ -1,21 +1,11 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Condvar, Mutex, MutexGuard, PoisonError};
 
-/// Wakes every sensor thread at each phase boundary.
+/// Wakes every sensor thread at each phase boundary using a condvar.
 pub(crate) struct Trigger {
     boundaries: Mutex<u64>,
     condvar: Condvar,
     running: AtomicBool,
-}
-
-impl Default for Trigger {
-    fn default() -> Self {
-        Self {
-            boundaries: Mutex::new(0),
-            condvar: Condvar::new(),
-            running: AtomicBool::new(true),
-        }
-    }
 }
 
 impl Trigger {
@@ -47,6 +37,16 @@ impl Trigger {
             self.running.store(false, Ordering::Release);
         }
         self.condvar.notify_all();
+    }
+}
+
+impl Default for Trigger {
+    fn default() -> Self {
+        Self {
+            boundaries: Mutex::new(0),
+            condvar: Condvar::new(),
+            running: AtomicBool::new(true),
+        }
     }
 }
 

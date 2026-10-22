@@ -90,9 +90,9 @@ impl JouleProfiler {
             .try_for_each(Source::init)
             .and_then(|()| {
                 let cgroup = self.cgroup.as_ref();
-                profile_target(sources, injector, exporter, cgroup, &schema, self.defer)
+                run_target(sources, injector, exporter, cgroup, &schema, self.defer)
             });
-        // Every source is closed, even if one fails to.
+
         sources
             .iter_mut()
             .map(Source::close)
@@ -106,7 +106,7 @@ impl JouleProfiler {
 }
 
 /// Starts the target, measures it until it ends, then waits for it.
-fn profile_target(
+fn run_target(
     sources: &mut [Source],
     injector: &mut dyn AnyInjector,
     exporter: &mut dyn AnyExporter,
@@ -114,7 +114,9 @@ fn profile_target(
     schema: &Schema,
     defer: bool,
 ) -> Result<Summary> {
+    cgroup.map_or(Ok(()), RunCgroup::freeze)?;
     let (target, stop) = injector.start()?;
+
     log::info!(
         "profiling pid {} with {} source(s)",
         target.pid,
@@ -134,7 +136,7 @@ fn profile_target(
                 .iter_mut()
                 .try_for_each(|source| source.attach(target))
         })
-        .and_then(|()| run(sources, injector, exporter, schema, &abort, defer));
+        .and_then(|()| run_threads(sources, injector, exporter, cgroup, schema, &abort, defer));
     if summary.is_err() {
         abort.abort();
     }
@@ -145,18 +147,24 @@ fn profile_target(
     Ok(summary)
 }
 
-/// Starts the threads, resumes the target once all are ready, then joins them.
-fn run(
+/// Starts the threads, thaws the cgroup and resumes the target once all are ready, then joins
+/// them.
+fn run_threads(
     sources: &mut [Source],
     injector: &mut dyn AnyInjector,
     exporter: &mut dyn AnyExporter,
+    cgroup: Option<&RunCgroup>,
     schema: &Schema,
     abort: &AbortHandle<'_>,
     defer: bool,
 ) -> Result<Summary> {
     thread::scope(|scope| {
         let (boundaries, received) = mpsc::channel();
-        let threads = start(scope, sources, exporter, schema, received, abort)
+        let threads = spawn_threads(scope, sources, exporter, schema, received, abort)
+            .and_then(|threads| {
+                cgroup.map_or(Ok(()), RunCgroup::thaw)?;
+                Ok(threads)
+            })
             .inspect_err(|_| abort.abort())?;
 
         let summary = injector.run(abort.trigger, boundaries, defer);
@@ -171,7 +179,7 @@ fn run(
 }
 
 /// Starts one thread per source and the exporter thread, and waits until all are ready.
-fn start<'scope>(
+fn spawn_threads<'scope>(
     scope: &'scope Scope<'scope, '_>,
     sources: &'scope mut [Source],
     exporter: &'scope mut dyn AnyExporter,
@@ -187,14 +195,14 @@ fn start<'scope>(
         processes.push(process);
     }
     threads.push(abort.spawn(scope, "exporter".to_owned(), move |ready_tx| {
-        export(schema, processes, exporter, &boundaries, ready_tx)
+        export_loop(schema, processes, exporter, &boundaries, ready_tx)
     })?);
 
     threads.into_iter().map(Starting::wait_for_ready).collect()
 }
 
 /// Turns each pair of boundaries into a phase for the exporter.
-fn export(
+fn export_loop(
     schema: &Schema,
     mut processes: Vec<Process<'_>>,
     exporter: &mut dyn AnyExporter,
@@ -210,7 +218,7 @@ fn export(
         .iter()
         .map(|source| Vec::with_capacity(source.metrics.len()))
         .collect();
-    let mut sources = SourceMetrics::of_schema(schema);
+    let mut sources = SourceMetrics::from_schema(schema);
     let mut phases = 0;
     let mut start: Option<PhaseBoundary> = None;
     let mut unflushed = false;
