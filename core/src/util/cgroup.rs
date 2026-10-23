@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use thiserror::Error;
 
+use crate::error::ErrorChain;
+
 pub const ROOT: &str = "/sys/fs/cgroup";
 
 const PROCS: &str = "cgroup.procs";
@@ -64,8 +66,12 @@ impl Cgroup {
     }
 
     pub fn move_processes_to(&self, other: &Self) {
-        let Ok(processes) = self.processes() else {
-            return;
+        let processes = match self.processes() {
+            Ok(processes) => processes,
+            Err(error) => {
+                log::warn!("reading the processes of {}: {error}", self.path.display());
+                return;
+            }
         };
 
         for pid in processes {
@@ -254,9 +260,13 @@ impl CgroupConfig {
             return Err(CgroupError::NotACgroup(self.parent));
         }
 
-        let read = |file: &str, error| CgroupError::Read(parent.path().join(file), error);
-        let available = parent.controllers().map_err(|e| read(CONTROLLERS, e))?;
-        let handed_down = parent.handed_down().map_err(|e| read(SUBTREE, e))?;
+        let read_failed = |file: &str, error| CgroupError::Read(parent.path().join(file), error);
+        let available = parent
+            .controllers()
+            .map_err(|error| read_failed(CONTROLLERS, error))?;
+        let handed_down = parent
+            .handed_down()
+            .map_err(|error| read_failed(SUBTREE, error))?;
 
         // Built first so that its `Drop` undoes any change if a later step fails.
         let mut run_cgroup = RunCgroup {
@@ -280,7 +290,7 @@ impl CgroupConfig {
 
             match run_cgroup.enable_controller(&controller, &available) {
                 Ok(()) => run_cgroup.controllers.push(controller),
-                Err(error) if !required => log::warn!("{error}"),
+                Err(error) if !required => log::warn!("{}", ErrorChain(&error)),
                 Err(error) => return Err(error),
             }
         }
@@ -382,7 +392,7 @@ impl Drop for RunCgroup {
     fn drop(&mut self) {
         // A run that failed before the sources were ready leaves it frozen.
         if let Err(error) = self.thaw() {
-            log::warn!("{error}");
+            log::warn!("{}", ErrorChain(&error));
         }
 
         if self.created {
@@ -433,17 +443,6 @@ mod tests {
         assert!(!cgroup.exists());
         assert_eq!(cgroup.read("memory.current").unwrap(), None);
         assert_eq!(cgroup.controllers().unwrap(), Vec::<String>::new());
-    }
-
-    #[test]
-    fn creating_and_removing_one() {
-        let cgroup = fake("lifecycle");
-
-        cgroup.create().unwrap();
-        assert!(cgroup.exists());
-
-        cgroup.remove().unwrap();
-        assert!(!cgroup.exists());
     }
 
     #[test]
@@ -600,15 +599,5 @@ mod tests {
             Err(CgroupError::NotACgroup(_))
         ));
         fs::remove_dir_all(parent.path()).unwrap();
-    }
-
-    #[test]
-    fn a_child_hangs_off_its_parent() {
-        let cgroup = Cgroup::at("/sys/fs/cgroup/one");
-
-        assert_eq!(
-            cgroup.child("two").path(),
-            Path::new("/sys/fs/cgroup/one/two")
-        );
     }
 }

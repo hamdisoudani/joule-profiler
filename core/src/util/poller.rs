@@ -1,7 +1,8 @@
-use std::fmt::Display;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
+
+use crate::error::ErrorChain;
 
 /// A thread that calls `tick` every interval until it is dropped.
 pub struct Poller {
@@ -10,7 +11,7 @@ pub struct Poller {
 }
 
 impl Poller {
-    pub fn start<E: Display>(
+    pub fn start<E: std::error::Error + 'static>(
         every: Duration,
         mut tick: impl FnMut() -> Result<(), E> + Send + 'static,
     ) -> Self {
@@ -33,7 +34,7 @@ impl Poller {
 
                 drop(asked);
                 if let Err(error) = tick() {
-                    log::warn!("polling failed: {error}");
+                    log::warn!("polling failed: {}", ErrorChain(&error));
                 }
                 asked = lock(stopped);
             }
@@ -52,8 +53,10 @@ impl Drop for Poller {
         *lock(stopped) = true;
         wake.notify_all();
 
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
+        if let Some(thread) = self.thread.take()
+            && thread.join().is_err()
+        {
+            log::warn!("the polling thread panicked");
         }
     }
 }
@@ -70,7 +73,7 @@ mod tests {
 
     #[test]
     fn a_poller_that_is_dropped_does_not_wait_for_its_next_look() {
-        let poller = Poller::start(Duration::from_secs(30), || Ok::<(), &str>(()));
+        let poller = Poller::start(Duration::from_secs(30), || Ok::<(), std::io::Error>(()));
 
         let at = Instant::now();
         drop(poller);
@@ -89,7 +92,7 @@ mod tests {
         let counted = Arc::clone(&looks);
         let poller = Poller::start(Duration::from_millis(10), move || {
             counted.fetch_add(1, Ordering::Relaxed);
-            Ok::<(), &str>(())
+            Ok::<(), std::io::Error>(())
         });
 
         thread::sleep(Duration::from_millis(150));
@@ -103,7 +106,7 @@ mod tests {
     fn a_poller_stopped_while_it_is_looking_does_not_sleep_again() {
         let poller = Poller::start(Duration::from_millis(5), || {
             thread::sleep(Duration::from_millis(200));
-            Ok::<(), &str>(())
+            Ok::<(), std::io::Error>(())
         });
 
         thread::sleep(Duration::from_millis(50));

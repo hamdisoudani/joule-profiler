@@ -2,7 +2,7 @@ use std::panic::{self, AssertUnwindSafe};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread::{self, Scope, ScopedJoinHandle};
 
-use crate::error::{Error, Result};
+use crate::error::{Error, ErrorChain, Result};
 use crate::exporter::{AnyExporter, Exporter};
 use crate::info::{self, Info};
 use crate::injector::{AnyInjector, Injector, StopHandle};
@@ -12,7 +12,7 @@ use crate::schema::{Schema, SourceInfo};
 use crate::source::{Process, Source};
 use crate::trigger::Trigger;
 use crate::util::cgroup::RunCgroup;
-use crate::util::time::millis_between;
+use crate::util::time::micros_between;
 
 /// The sources measure what the injector runs, and the exporter receives each phase.
 #[derive(Default)]
@@ -210,7 +210,7 @@ fn export_loop(
     ready: Sender<()>,
 ) -> Result<()> {
     exporter.begin(schema)?;
-    ready.send(()).map_err(Error::exporter)?;
+    ready.send(()).map_err(Error::exporter_failed)?;
     drop(ready);
 
     let mut values: Vec<Vec<MetricValue>> = schema
@@ -255,7 +255,7 @@ fn export_loop(
                 start_line: start.line,
                 end_line: end.line,
                 timestamp_us: start.timestamp_us,
-                duration_ms: millis_between(start.timestamp_us, end.timestamp_us),
+                duration_us: micros_between(start.timestamp_us, end.timestamp_us),
             };
             exporter.export(&phase, &sources)?;
             phases += 1;
@@ -298,7 +298,7 @@ impl AbortHandle<'_> {
                 let outcome = panic::catch_unwind(AssertUnwindSafe(|| f(ready_tx)))
                     .unwrap_or_else(|_| Err(Error::Panicked(thread_name)));
                 if let Err(error) = &outcome {
-                    log::debug!("aborting the run: {error}");
+                    log::debug!("aborting the run: {}", ErrorChain(error));
                     self.abort();
                 }
                 outcome

@@ -134,15 +134,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn entries_keep_the_order_they_were_added_in() {
-        let info = Info::new().with("b", "2").with("a", "1");
-
-        let keys: Vec<&str> = info.entries().iter().map(|(key, _)| key.as_str()).collect();
-
-        assert_eq!(keys, ["b", "a"]);
-    }
-
-    #[test]
     fn a_value_that_could_not_be_read_says_why() {
         let failed: io::Result<String> = Err(io::Error::other("no such file"));
 

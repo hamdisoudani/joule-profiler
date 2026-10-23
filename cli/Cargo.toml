@@ -37,8 +37,7 @@ toml = "1.1.2"
 [features]
 default = ["rapl-perf", "rapl-powercap", "perf_event", "nvml", "amdsmi", "procfs", "cgroup"]
 
-rapl = ["dep:joule-profiler-source-rapl"]
-_rapl = ["rapl"]
+_rapl = ["dep:joule-profiler-source-rapl"]
 rapl-perf = ["_rapl", "joule-profiler-source-rapl/backend-perf"]
 rapl-powercap = ["_rapl", "joule-profiler-source-rapl/backend-powercap"]
 

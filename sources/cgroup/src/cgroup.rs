@@ -40,10 +40,13 @@ pub(crate) trait Usage {
 
 impl Usage for Cgroup {
     fn memory_usage(&self) -> Result<[Option<u64>; MEMORY.len()]> {
-        let read = |file: &str| self.read_u64(file).map_err(|e| failed(self, file, e));
+        let read = |file: &str| {
+            self.read_u64(file)
+                .map_err(|error| read_failed(self, file, error))
+        };
         let stat = self
             .read_keyed("memory.stat")
-            .map_err(|e| failed(self, "memory.stat", e))?;
+            .map_err(|error| read_failed(self, "memory.stat", error))?;
 
         Ok([
             read("memory.current")?,
@@ -61,7 +64,7 @@ impl Usage for Cgroup {
     fn counters(&self) -> Result<[Option<u64>; COUNTERS.len()]> {
         let stat = self
             .read_keyed("cpu.stat")
-            .map_err(|e| failed(self, "cpu.stat", e))?;
+            .map_err(|error| read_failed(self, "cpu.stat", error))?;
         let [read, written] = io_bytes(self)?;
 
         Ok(COUNTERS.map(|(name, _)| match name {
@@ -76,7 +79,7 @@ impl Usage for Cgroup {
 fn io_bytes(cgroup: &Cgroup) -> Result<[Option<u64>; 2]> {
     let Some(content) = cgroup
         .read("io.stat")
-        .map_err(|e| failed(cgroup, "io.stat", e))?
+        .map_err(|error| read_failed(cgroup, "io.stat", error))?
     else {
         return Ok([None, None]);
     };
@@ -103,14 +106,14 @@ pub(crate) fn controllers(cgroup: &Cgroup) -> Result<Vec<String>> {
             let parent = Cgroup::at(parent);
             parent
                 .controllers()
-                .map_err(|e| failed(&parent, "cgroup.controllers", e))
+                .map_err(|error| read_failed(&parent, "cgroup.controllers", error))
         }
         _ => cgroup
             .controllers()
-            .map_err(|e| failed(cgroup, "cgroup.controllers", e)),
+            .map_err(|error| read_failed(cgroup, "cgroup.controllers", error)),
     }
 }
 
-fn failed(cgroup: &Cgroup, file: &str, error: std::io::Error) -> CgroupError {
+fn read_failed(cgroup: &Cgroup, file: &str, error: std::io::Error) -> CgroupError {
     CgroupError::Read(cgroup.path().join(file), error)
 }

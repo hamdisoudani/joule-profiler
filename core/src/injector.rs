@@ -4,7 +4,7 @@ use std::time::Instant;
 use crate::error::{BoxError, Error, Result};
 use crate::phase::{PhaseBoundary, Summary};
 use crate::trigger::Trigger;
-use crate::util::time::{get_timestamp_micros, millis_between};
+use crate::util::time::{get_timestamp_micros, micros_between};
 
 /// The profiled process.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,7 +73,7 @@ pub(crate) trait AnyInjector: Send {
 
 impl<I: Injector> AnyInjector for I {
     fn start(&mut self) -> Result<(Target, StopHandle)> {
-        let target = Injector::start(self).map_err(Error::injector)?;
+        let target = Injector::start(self).map_err(Error::injector_failed)?;
         Ok((target, self.stop_handle()))
     }
 
@@ -83,7 +83,7 @@ impl<I: Injector> AnyInjector for I {
         boundaries: Sender<PhaseBoundary>,
         defer: bool,
     ) -> Result<Summary> {
-        let send = |boundary| boundaries.send(boundary).map_err(Error::exporter);
+        let send = |boundary| boundaries.send(boundary).map_err(Error::exporter_failed);
         if !defer {
             return run_with(self, trigger, send);
         }
@@ -98,7 +98,7 @@ impl<I: Injector> AnyInjector for I {
     }
 
     fn wait(&mut self) -> Result<Option<i32>> {
-        Injector::wait(self).map_err(Error::injector)
+        Injector::wait(self).map_err(Error::injector_failed)
     }
 }
 
@@ -111,7 +111,8 @@ fn run_with(
     let start_timestamp = get_timestamp_micros();
     let timestamp = || start_timestamp + start.elapsed().as_micros();
 
-    injector.resume().map_err(Error::injector)?;
+    trigger.trigger();
+    injector.resume().map_err(Error::injector_failed)?;
     send_fn(PhaseBoundary {
         token: "START".to_owned(),
         line: None,
@@ -120,7 +121,7 @@ fn run_with(
 
     let mut phases = 0;
     let end_timestamp = loop {
-        let token = injector.next_phase().map_err(Error::injector)?;
+        let token = injector.next_phase().map_err(Error::injector_failed)?;
         let end_timestamp = timestamp();
         trigger.trigger();
         phases += 1;
@@ -142,7 +143,7 @@ fn run_with(
 
     Ok(Summary {
         timestamp_us: start_timestamp,
-        duration_ms: millis_between(start_timestamp, end_timestamp),
+        duration_us: micros_between(start_timestamp, end_timestamp),
         phases,
         exit_code: None,
     })

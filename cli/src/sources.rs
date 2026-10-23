@@ -12,7 +12,7 @@ use joule_profiler_source_nvml::Nvml;
 use joule_profiler_source_perf_event::PerfEvent;
 #[cfg(feature = "procfs")]
 use joule_profiler_source_procfs::Procfs;
-#[cfg(feature = "rapl")]
+#[cfg(feature = "_rapl")]
 use joule_profiler_source_rapl::Rapl;
 use toml::Value;
 
@@ -50,7 +50,7 @@ pub fn add(
 
 fn build(profiler: &mut JouleProfiler, name: SourceName, table: Option<&Value>) -> Result<()> {
     profiler.add_source(match name {
-        #[cfg(feature = "rapl")]
+        #[cfg(feature = "_rapl")]
         SourceName::Rapl => read_source_config::<Rapl>(name, table)?.build()?,
         #[cfg(feature = "perf_event")]
         SourceName::Perf => read_source_config::<PerfEvent>(name, table)?.build(),

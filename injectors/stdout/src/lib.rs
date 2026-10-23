@@ -17,14 +17,14 @@ pub enum StdoutError {
     #[error("the command to profile is empty")]
     EmptyCommand,
 
-    #[error("invalid token pattern: {0}")]
-    Pattern(regex::Error),
+    #[error("invalid token pattern")]
+    Pattern(#[source] regex::Error),
 
     #[error("command not found: `{0}`")]
     NotFound(String),
 
-    #[error("could not start `{0}`: {1}")]
-    Spawn(String, io::Error),
+    #[error("could not start `{0}`")]
+    Spawn(String, #[source] io::Error),
 
     #[error(
         "running as root, but SUDO_UID and SUDO_GID do not say who asked: set them, or use \
@@ -32,14 +32,26 @@ pub enum StdoutError {
     )]
     NoInvokingUser,
 
-    #[error("could not create {0}: {1}")]
-    OutputFile(PathBuf, io::Error),
+    #[error("could not create {0}")]
+    OutputFile(PathBuf, #[source] io::Error),
 
     #[error("the command has not been started")]
     NotStarted,
 
-    #[error(transparent)]
-    Io(#[from] io::Error),
+    #[error("stopping the command before it runs")]
+    Stop(#[source] io::Error),
+
+    #[error("resuming the command")]
+    Resume(#[source] io::Error),
+
+    #[error("reading the output of the command")]
+    ReadOutput(#[source] io::Error),
+
+    #[error("writing the output of the command")]
+    WriteOutput(#[source] io::Error),
+
+    #[error("waiting for the command")]
+    Wait(#[source] io::Error),
 }
 
 pub struct StdoutInjector {
@@ -92,7 +104,7 @@ impl Injector for StdoutInjector {
     fn start(&mut self) -> Result<Target, StdoutError> {
         self.output = match &self.output_file {
             Some(path) => Box::new(BufWriter::new(
-                create_file(path).map_err(|e| StdoutError::OutputFile(path.clone(), e))?,
+                create_file(path).map_err(|error| StdoutError::OutputFile(path.clone(), error))?,
             )),
             None => Box::new(BufWriter::new(io::stdout())),
         };
@@ -120,7 +132,7 @@ impl Injector for StdoutInjector {
             if let Err(cleanup) = child.kill().and_then(|()| child.wait()) {
                 log::warn!("the command could not be killed: {cleanup}");
             }
-            return Err(error.into());
+            return Err(StdoutError::Stop(error));
         }
 
         self.stdout = child.stdout.take().map(BufReader::new);
@@ -138,7 +150,7 @@ impl Injector for StdoutInjector {
 
     fn resume(&mut self) -> Result<(), StdoutError> {
         let child = self.child.as_ref().ok_or(StdoutError::NotStarted)?;
-        Ok(signal(get_pid(child), libc::SIGCONT)?)
+        signal(get_pid(child), libc::SIGCONT).map_err(StdoutError::Resume)
     }
 
     fn next_phase(&mut self) -> Result<Option<PhaseToken>, StdoutError> {
@@ -146,16 +158,21 @@ impl Injector for StdoutInjector {
 
         loop {
             if stdout.buffer().is_empty() {
-                self.output.flush()?;
+                self.output.flush().map_err(StdoutError::WriteOutput)?;
             }
 
             self.line.clear();
-            if stdout.read_until(b'\n', &mut self.line)? == 0 {
-                self.output.flush()?;
+            let read = stdout
+                .read_until(b'\n', &mut self.line)
+                .map_err(StdoutError::ReadOutput)?;
+            if read == 0 {
+                self.output.flush().map_err(StdoutError::WriteOutput)?;
                 return Ok(None);
             }
             self.line_number += 1;
-            self.output.write_all(&self.line)?;
+            self.output
+                .write_all(&self.line)
+                .map_err(StdoutError::WriteOutput)?;
 
             if let Some(token) = self.pattern.find(&self.line) {
                 return Ok(Some(PhaseToken {
@@ -169,8 +186,8 @@ impl Injector for StdoutInjector {
     fn wait(&mut self) -> Result<Option<i32>, StdoutError> {
         self.stdout = None;
         let mut child = self.child.take().ok_or(StdoutError::NotStarted)?;
-        let status = child.wait()?;
-        self.output.flush()?;
+        let status = child.wait().map_err(StdoutError::Wait)?;
+        self.output.flush().map_err(StdoutError::WriteOutput)?;
 
         Ok(status
             .code()

@@ -63,8 +63,8 @@ impl PerfScope for CgroupScope {
     }
 
     fn open(&mut self) -> Result<()> {
-        let cgroup =
-            File::open(&self.path).map_err(|e| PerfEventError::OpenCgroup(self.path.clone(), e))?;
+        let cgroup = File::open(&self.path)
+            .map_err(|error| PerfEventError::OpenCgroup(self.path.clone(), error))?;
 
         let mut groups = Vec::new();
 
@@ -78,9 +78,9 @@ impl PerfScope for CgroupScope {
                 .exclude_guest(false)
                 .exclude_host(false)
                 .build_group()
-                .map_err(|e| match e.kind() {
-                    ErrorKind::PermissionDenied => PerfEventError::PermissionDenied(e),
-                    _ => PerfEventError::OpenGroup(cpu, e),
+                .map_err(|error| match error.kind() {
+                    ErrorKind::PermissionDenied => PerfEventError::PermissionDenied(error),
+                    _ => PerfEventError::OpenGroup(cpu, error),
                 })?;
 
             let mut counters = Vec::with_capacity(self.events.len());
@@ -94,7 +94,7 @@ impl PerfScope for CgroupScope {
                     .exclude_guest(false)
                     .exclude_host(false)
                     .build_with_group(&mut group)
-                    .map_err(|e| PerfEventError::OpenCounter(*event, e))?;
+                    .map_err(|error| PerfEventError::OpenCounter(*event, error))?;
 
                 counters.push(counter);
             }
@@ -125,7 +125,7 @@ impl PerfScope for CgroupScope {
             let data = cpu
                 .group
                 .read()
-                .map_err(|e| PerfEventError::ReadGroup(cpu.cpu, e))?;
+                .map_err(|error| PerfEventError::ReadGroup(cpu.cpu, error))?;
 
             for (counter, value) in cpu.counters.iter().zip(raw.iter_mut()) {
                 *value += data.get(counter).map_or(0, |entry| entry.value());
@@ -150,7 +150,7 @@ impl PerfScope for CgroupScope {
 /// The wanted CPUs, or every online one, sorted.
 fn resolve_cpus(wanted: Option<&HashSet<u32>>) -> Result<Vec<u32>> {
     let path = Path::new(ONLINE_CPUS);
-    let online = read_cpu_list(path).map_err(|e| PerfEventError::Read(path.into(), e))?;
+    let online = read_cpu_list(path).map_err(|error| PerfEventError::Read(path.into(), error))?;
 
     let mut cpus: Vec<u32> = match wanted {
         Some(wanted) => {

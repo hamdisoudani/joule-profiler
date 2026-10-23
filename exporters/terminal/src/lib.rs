@@ -125,7 +125,7 @@ impl Exporter for TerminalExporter {
         heavy_box(out, scratch, rules)?;
 
         label(out, "Duration")?;
-        writeln!(out, "{:>VALUE$} ms", phase.duration_ms)?;
+        write_duration(out, scratch, phase.duration_us)?;
 
         if let Some(line) = phase.start_line {
             label(out, "Start token line")?;
@@ -141,7 +141,7 @@ impl Exporter for TerminalExporter {
             out.write_all(reported.heading.as_bytes())?;
 
             for (measured, line) in source.metrics.iter().zip(&reported.lines) {
-                metric(out, scratch, line, measured.value)?;
+                write_metric(out, scratch, line, measured.value)?;
             }
         }
 
@@ -153,15 +153,20 @@ impl Exporter for TerminalExporter {
     }
 
     fn finish(&mut self, summary: &Summary) -> io::Result<()> {
-        let out = &mut self.out;
+        let Self {
+            out,
+            scratch,
+            rules,
+            ..
+        } = self;
 
-        heavy_box(out, "Summary", &self.rules)?;
+        heavy_box(out, "Summary", rules)?;
 
         label(out, "Phases")?;
         writeln!(out, "{:>VALUE$}", summary.phases)?;
 
         label(out, "Total duration")?;
-        writeln!(out, "{:>VALUE$} ms", summary.duration_ms)?;
+        write_duration(out, scratch, summary.duration_us)?;
 
         if let Some(code) = summary.exit_code {
             label(out, "Exit code")?;
@@ -217,7 +222,7 @@ fn write_info(out: &mut impl Write, title: &str, sections: &[(String, Info)]) ->
 }
 
 /// Writes a metric line, its value right-aligned.
-fn metric(
+fn write_metric(
     out: &mut impl Write,
     scratch: &mut String,
     line: &Line,
@@ -233,6 +238,16 @@ fn metric(
     out.write_all(scratch.as_bytes())?;
 
     out.write_all(line.after.as_bytes())
+}
+
+/// Writes a duration in milliseconds with microsecond precision, right-aligned.
+fn write_duration(out: &mut impl Write, scratch: &mut String, micros: u64) -> io::Result<()> {
+    scratch.clear();
+    let _ = write!(scratch, "{}.{:03}", micros / 1000, micros % 1000);
+
+    out.write_all(room(VALUE, scratch).as_bytes())?;
+    out.write_all(scratch.as_bytes())?;
+    out.write_all(b" ms\n")
 }
 
 /// Writes a padded label. A label longer than the column is not cut.
@@ -296,7 +311,8 @@ mod tests {
     fn written(name: &str, value: MetricValue, unit: MetricUnit) -> String {
         let mut out = Vec::new();
         let mut scratch = String::new();
-        metric(&mut out, &mut scratch, &Line::new(name, unit), value).expect("a vec cannot fail");
+        write_metric(&mut out, &mut scratch, &Line::new(name, unit), value)
+            .expect("a vec cannot fail");
 
         String::from_utf8(out).expect("a metric writes utf-8")
     }
@@ -308,12 +324,12 @@ mod tests {
         let line = Line::new("core", J);
 
         for _ in 0..2 {
-            metric(&mut out, &mut scratch, &line, MetricValue::F64(123.456)).unwrap();
+            write_metric(&mut out, &mut scratch, &line, MetricValue::F64(123.456)).unwrap();
         }
         let settled = scratch.capacity();
 
         for value in 0..1_000 {
-            metric(&mut out, &mut scratch, &line, MetricValue::U64(value)).unwrap();
+            write_metric(&mut out, &mut scratch, &line, MetricValue::U64(value)).unwrap();
         }
 
         assert_eq!(

@@ -212,6 +212,7 @@ fn get_configured_sources(cli: &Cli, file: &ConfigFile) -> Result<Vec<SourceName
     Ok(sources)
 }
 
+#[cfg_attr(not(feature = "cgroup"), allow(unused_variables))]
 fn needs_run_cgroup(sources: &[SourceName], tables: &Table) -> bool {
     #[cfg(feature = "cgroup")]
     {
@@ -224,10 +225,7 @@ fn needs_run_cgroup(sources: &[SourceName], tables: &Table) -> bool {
     }
 
     #[cfg(not(feature = "cgroup"))]
-    {
-        let _ = (sources, tables);
-        false
-    }
+    false
 }
 
 /// Reads a source configuration from its table. No table means all defaults.

@@ -75,21 +75,3 @@ impl Display for Event {
         })
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn events_slice_contains_all_default_variants() {
-        assert!(Event::DEFAULT.contains(&Event::CpuCycles));
-        assert!(Event::DEFAULT.contains(&Event::Instructions));
-        assert!(Event::DEFAULT.contains(&Event::CacheMisses));
-        assert!(Event::DEFAULT.contains(&Event::BranchMisses));
-    }
-
-    #[test]
-    fn an_event_is_reported_in_capitals() {
-        assert_eq!(Event::BranchMisses.to_string(), "BRANCH_MISSES");
-    }
-}

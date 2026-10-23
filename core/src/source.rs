@@ -53,7 +53,8 @@ impl Source {
     }
 }
 
-/// Processes the phase ended by the next snapshot. `false` once the sensor has stopped.
+/// Processes the phase between the next two snapshots, the first being that of the start of the
+/// run. `false` once the sensor has stopped.
 pub(crate) type Process<'a> = Box<dyn FnMut(&mut Vec<MetricValue>) -> Result<bool> + Send + 'a>;
 
 trait AnySource: Send {
@@ -85,13 +86,15 @@ impl<S: Sensor, P: Processor<S>> AnySource for (S, P) {
     }
 
     fn init(&mut self) -> Result<()> {
-        self.0.init().map_err(|error| failed(self.0.name(), error))
+        self.0
+            .init()
+            .map_err(|error| Error::source_failed(self.0.name(), error))
     }
 
     fn attach(&mut self, target: Target) -> Result<()> {
         self.0
             .attach(target)
-            .map_err(|error| failed(self.0.name(), error))
+            .map_err(|error| Error::source_failed(self.0.name(), error))
     }
 
     fn start<'scope>(
@@ -102,7 +105,6 @@ impl<S: Sensor, P: Processor<S>> AnySource for (S, P) {
     ) -> Result<(Starting<'scope, ()>, Process<'scope>)> {
         let (sensor, processor) = self;
         let name = sensor.name().to_owned();
-        let mut previous = sensor.measure().map_err(|error| failed(&name, error))?;
         let (sender, receiver) = mpsc::channel();
 
         let sensor_handle = abort.spawn(scope, format!("source-{name}"), move |ready| {
@@ -110,13 +112,18 @@ impl<S: Sensor, P: Processor<S>> AnySource for (S, P) {
         })?;
 
         let declared = processor.metrics().len();
+        let mut snapshots = receiver.into_iter();
+        let mut previous = None;
         let process = move |values: &mut Vec<MetricValue>| {
-            let Ok(current) = receiver.recv() else {
+            let Some(start) = previous.take().or_else(|| snapshots.next()) else {
+                return Ok(false);
+            };
+            let Some(end) = snapshots.next() else {
                 return Ok(false);
             };
             processor
-                .process(&previous, &current, values)
-                .map_err(|error| failed(&name, error))?;
+                .process(&start, &end, values)
+                .map_err(|error| Error::source_failed(&name, error))?;
             if values.len() != declared {
                 return Err(Error::MetricCount {
                     name: name.clone(),
@@ -124,7 +131,7 @@ impl<S: Sensor, P: Processor<S>> AnySource for (S, P) {
                     produced: values.len(),
                 });
             }
-            previous = current;
+            previous = Some(end);
             Ok(true)
         };
 
@@ -132,11 +139,13 @@ impl<S: Sensor, P: Processor<S>> AnySource for (S, P) {
     }
 
     fn close(&mut self) -> Result<()> {
-        self.0.close().map_err(|error| failed(self.0.name(), error))
+        self.0
+            .close()
+            .map_err(|error| Error::source_failed(self.0.name(), error))
     }
 }
 
-/// Measures at every boundary until the run is over.
+/// Measures at every boundary, the start of the run included, until the run is over.
 fn measure<S: Sensor>(
     sensor: &mut S,
     snapshots: &Sender<S::Snapshot>,
@@ -146,23 +155,16 @@ fn measure<S: Sensor>(
     let mut waiter = trigger.waiter();
     ready
         .send(())
-        .map_err(|error| failed(sensor.name(), error))?;
+        .map_err(|error| Error::source_failed(sensor.name(), error))?;
     drop(ready);
 
     while waiter.wait() {
         let snapshot = sensor
             .measure()
-            .map_err(|error| failed(sensor.name(), error))?;
+            .map_err(|error| Error::source_failed(sensor.name(), error))?;
         if snapshots.send(snapshot).is_err() {
             break;
         }
     }
     Ok(())
-}
-
-fn failed(name: &str, error: impl std::error::Error + Send + Sync + 'static) -> Error {
-    Error::Source {
-        name: name.to_owned(),
-        error: Box::new(error),
-    }
 }

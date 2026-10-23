@@ -7,11 +7,11 @@ use crate::{
 };
 
 pub(crate) fn build_counter(domain: &'_ RaplDomain) -> Result<Builder<'_>> {
-    let mut event = Dynamic::builder(PMU).map_err(RaplError::Io)?;
+    let mut event = Dynamic::builder(PMU).map_err(RaplError::Pmu)?;
     event
         .event(domain.domain.to_perf_event())
-        .map_err(RaplError::Io)?;
-    let event = event.build().map_err(|e| RaplError::Event(e.to_string()))?;
+        .map_err(RaplError::Pmu)?;
+    let event = event.build().map_err(RaplError::Event)?;
 
     let mut builder = Builder::new(event);
     builder

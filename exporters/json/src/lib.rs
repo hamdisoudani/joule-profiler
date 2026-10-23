@@ -110,7 +110,7 @@ impl JsonExporter {
 
     pub fn to_file(path: impl AsRef<Path>, shape: Shape) -> Result<Self> {
         let path = path.as_ref();
-        let file = create_file(path).map_err(|e| JsonError::Create(path.into(), e))?;
+        let file = create_file(path).map_err(|error| JsonError::Create(path.into(), error))?;
 
         Ok(Self {
             out: BufWriter::new(file),
@@ -205,7 +205,7 @@ mod tests {
             start_line: None,
             end_line: Some(3),
             timestamp_us: 10,
-            duration_ms: 2,
+            duration_us: 2_000,
         }
     }
 

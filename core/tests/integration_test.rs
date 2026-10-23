@@ -58,7 +58,7 @@ enum Fail {
     Nothing,
     Init,
     Attach,
-    /// The nth measure, the first being taken before the target resumes.
+    /// The nth measure, the first being that of the start of the run.
     Measure(usize),
     Panic(usize),
     Begin,
@@ -439,25 +439,16 @@ fn a_source_that_cannot_attach_stops_the_target() {
 }
 
 #[test]
-fn a_source_that_cannot_take_its_first_measure_never_resumes_the_target() {
-    let (summary, events, _) = Run::printing(&["__A__"])
-        .failing(Fail::Measure(1))
-        .profile();
+fn a_measure_that_fails_stops_the_target_from_the_start_of_the_run_on() {
+    for at in [1, 3] {
+        let (summary, events, _) = Run::printing(&["__A__", "__B__", "__C__"])
+            .failing(Fail::Measure(at))
+            .profile();
 
-    assert!(matches!(summary, Err(Error::Source { .. })));
-    assert!(!events.has("resumed"), "the target was resumed anyway");
-    assert_cleaned_up(&events, 2);
-}
-
-#[test]
-fn a_measure_that_fails_during_the_run_stops_the_target() {
-    let (summary, events, _) = Run::printing(&["__A__", "__B__", "__C__"])
-        .failing(Fail::Measure(3))
-        .profile();
-
-    assert!(matches!(summary, Err(Error::Source { .. })));
-    assert!(events.has("stopped"));
-    assert_cleaned_up(&events, 2);
+        assert!(matches!(summary, Err(Error::Source { .. })), "measure {at}");
+        assert!(events.has("stopped"), "measure {at}");
+        assert_cleaned_up(&events, 2);
+    }
 }
 
 #[test]

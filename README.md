@@ -52,7 +52,7 @@ Any key of the configuration file can be set from the command line with `-D KEY=
 
 ```bash
 # Switch the RAPL backend and restrict it to the first socket
-joule-profiler -D profiler.rapl_backend=powercap -D "sources.rapl.sockets_spec=[0]" profile -- <COMMAND>
+joule-profiler -D sources.rapl.backend=powercap -D "sources.rapl.sockets=[0]" profile -- <COMMAND>
 ```
 
 > [!IMPORTANT]

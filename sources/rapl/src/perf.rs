@@ -52,7 +52,7 @@ impl SocketGroup {
             .exclude_kernel(false)
             .exclude_hv(false)
             .build_group()
-            .map_err(|e| RaplError::OpenGroup(cpu, e))?;
+            .map_err(|error| RaplError::OpenGroup(cpu, error))?;
 
         Ok(Self {
             cpu,
@@ -97,13 +97,16 @@ impl Sensor for RaplPerfSensor {
             let socket = &mut self.sockets[index];
             let counter = build_counter(domain)?
                 .build_with_group(&mut socket.group)
-                .map_err(|e| RaplError::OpenCounter(domain.name(), e))?;
+                .map_err(|error| RaplError::OpenCounter(domain.name(), error))?;
 
             socket.counters.push((counter, slot));
         }
 
         for socket in &mut self.sockets {
-            socket.group.enable().map_err(RaplError::Io)?;
+            socket
+                .group
+                .enable()
+                .map_err(|error| RaplError::Switch(socket.cpu, error))?;
         }
 
         log::debug!("rapl: {} socket groups opened", self.sockets.len());
@@ -114,7 +117,10 @@ impl Sensor for RaplPerfSensor {
         let mut snapshot = vec![0; self.domains.len()];
 
         for socket in &mut self.sockets {
-            let data = socket.group.read().map_err(RaplError::Io)?;
+            let data = socket
+                .group
+                .read()
+                .map_err(|error| RaplError::ReadGroup(socket.cpu, error))?;
 
             for (counter, slot) in &socket.counters {
                 snapshot[*slot] = data.get(counter).ok_or(RaplError::MissingCounter)?.value();
@@ -126,7 +132,10 @@ impl Sensor for RaplPerfSensor {
 
     fn close(&mut self) -> Result<()> {
         for socket in &mut self.sockets {
-            socket.group.disable().map_err(RaplError::Io)?;
+            socket
+                .group
+                .disable()
+                .map_err(|error| RaplError::Switch(socket.cpu, error))?;
         }
         Ok(())
     }

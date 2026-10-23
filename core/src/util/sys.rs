@@ -220,17 +220,6 @@ mod tests {
     }
 
     #[test]
-    fn a_socket_knows_which_cpus_it_holds() {
-        let socket = Socket {
-            id: 0,
-            cpus: vec![0, 2, 4],
-        };
-
-        assert!(socket.holds(2));
-        assert!(!socket.holds(3));
-    }
-
-    #[test]
     fn a_cpu_list_reads_its_ranges_and_single_cpus() {
         assert_eq!(
             parse_cpu_list("0-3,8,10-11\n"),

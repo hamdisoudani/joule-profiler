@@ -6,7 +6,7 @@ use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use serde::Deserialize;
 
 #[cfg(not(any(
-    feature = "rapl",
+    feature = "_rapl",
     feature = "perf_event",
     feature = "procfs",
     feature = "cgroup",
@@ -24,10 +24,10 @@ compile_error!("at least one source feature must be enabled");
 pub struct Cli {
     /// Sources to activate, comma separated. (e.g. "rapl,perf,procfs")
     #[cfg_attr(
-        feature = "rapl",
+        feature = "_rapl",
         arg(long, value_delimiter = ',', default_value = "rapl")
     )]
-    #[cfg_attr(not(feature = "rapl"), arg(long, value_delimiter = ','))]
+    #[cfg_attr(not(feature = "_rapl"), arg(long, value_delimiter = ','))]
     pub sources: Vec<SourceName>,
 
     /// Configuration file. A `[sources.<name>]` table turns that source on.
@@ -76,7 +76,7 @@ impl Cli {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, ValueEnum)]
 pub enum SourceName {
     /// Energy per socket and domain, through the `power` PMU or powercap.
-    #[cfg(feature = "rapl")]
+    #[cfg(feature = "_rapl")]
     Rapl,
 
     /// Hardware counters, on the profiled process or on a cgroup.
@@ -125,7 +125,7 @@ impl SourceName {
 
     fn as_str(self) -> &'static str {
         match self {
-            #[cfg(feature = "rapl")]
+            #[cfg(feature = "_rapl")]
             SourceName::Rapl => "rapl",
             #[cfg(feature = "perf_event")]
             SourceName::Perf => "perf",
@@ -166,6 +166,7 @@ pub struct ProfileArgs {
     #[arg(long = "token-pattern", value_name = "REGEX")]
     pub token_pattern: Option<String>,
 
+    /// Processes and exports the phases only once the command has ended.
     #[arg(long = "defer")]
     pub defer: bool,
 

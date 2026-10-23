@@ -13,7 +13,7 @@ pub struct PhaseInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub end_line: Option<usize>,
     pub timestamp_us: u128,
-    pub duration_ms: u64,
+    pub duration_us: u64,
 }
 
 impl PhaseInfo {
@@ -68,7 +68,7 @@ impl<'a> SourceMetrics<'a> {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Summary {
     pub timestamp_us: u128,
-    pub duration_ms: u64,
+    pub duration_us: u64,
     pub phases: usize,
     pub exit_code: Option<i32>,
 }

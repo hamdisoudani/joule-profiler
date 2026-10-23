@@ -34,7 +34,7 @@ const COLUMNS: [&str; 12] = [
     "start_token_line",
     "end_token_line",
     "start_timestamp",
-    "duration_ms",
+    "duration_us",
     "source",
     "metric",
     "value",
@@ -58,7 +58,7 @@ impl CsvExporter {
 
     pub fn to_file(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
-        let file = create_file(path).map_err(|e| CsvError::Create(path.into(), e))?;
+        let file = create_file(path).map_err(|error| CsvError::Create(path.into(), error))?;
 
         Ok(Self {
             out: WriterBuilder::new()
@@ -91,7 +91,7 @@ impl Exporter for CsvExporter {
         let start_line = line(phase.start_line);
         let end_line = line(phase.end_line);
         let timestamp = phase.timestamp_us.to_string();
-        let duration = phase.duration_ms.to_string();
+        let duration = phase.duration_us.to_string();
 
         for source in sources {
             for metric in &source.metrics {

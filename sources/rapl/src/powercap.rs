@@ -72,13 +72,13 @@ fn read_energy(dir: &Path) -> Result<u64> {
 
     let content = fs::read_to_string(&path).map_err(|error| match error.kind() {
         ErrorKind::PermissionDenied => RaplError::PowercapDenied(path.clone()),
-        _ => RaplError::Io(error),
+        _ => RaplError::Read(path.clone(), error),
     })?;
 
     content
         .trim()
         .parse()
-        .map_err(|_| RaplError::NotANumber(path))
+        .map_err(|error| RaplError::NotANumber(path, error))
 }
 
 /// A domain with a known name and an `energy_uj` file.
@@ -106,7 +106,7 @@ fn read_domain(dir: &Path, socket: u32, unit: EnergyUnit) -> Option<PowercapDoma
 
 fn sorted_dirs(root: &Path) -> Result<Vec<PathBuf>> {
     let mut dirs: Vec<PathBuf> = fs::read_dir(root)
-        .map_err(RaplError::Io)?
+        .map_err(|error| RaplError::Read(root.into(), error))?
         .flatten()
         .map(|entry| entry.path())
         .filter(|path| path.is_dir())

@@ -37,11 +37,11 @@ impl Leader {
                 Ok(Self::OneByOne(
                     observing(Software::DUMMY, pid)
                         .build()
-                        .map_err(open_error)?,
+                        .map_err(open_leader_failed)?,
                 ))
             }
 
-            Err(error) => Err(open_error(error)),
+            Err(error) => Err(open_leader_failed(error)),
         }
     }
 
@@ -93,7 +93,7 @@ impl Opened {
                 .map(|(event, counter)| {
                     counter
                         .read()
-                        .map_err(|e| PerfEventError::ReadCounter(*event, e))
+                        .map_err(|error| PerfEventError::ReadCounter(*event, error))
                 })
                 .collect(),
         }
@@ -127,9 +127,9 @@ impl PerfScope for PidScope {
         for event in &self.events {
             let counter = observing(Hardware::from(*event), target.pid)
                 .build_with_group(leader.as_counter_mut())
-                .map_err(|e| match e.kind() {
-                    ErrorKind::PermissionDenied => PerfEventError::PermissionDenied(e),
-                    _ => PerfEventError::OpenCounter(*event, e),
+                .map_err(|error| match error.kind() {
+                    ErrorKind::PermissionDenied => PerfEventError::PermissionDenied(error),
+                    _ => PerfEventError::OpenCounter(*event, error),
                 })?;
 
             counters.push(counter);
@@ -170,7 +170,7 @@ fn observing<E: perf_event::events::Event>(event: E, pid: i32) -> Builder<'stati
     builder
 }
 
-fn open_error(error: io::Error) -> PerfEventError {
+fn open_leader_failed(error: io::Error) -> PerfEventError {
     match error.kind() {
         ErrorKind::PermissionDenied => PerfEventError::PermissionDenied(error),
         _ => PerfEventError::OpenLeader(error),

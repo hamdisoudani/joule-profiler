@@ -38,18 +38,18 @@ pub(crate) trait AnyExporter: Send {
 
 impl<E: Exporter> AnyExporter for E {
     fn begin(&mut self, schema: &Schema) -> Result<()> {
-        Exporter::begin(self, schema).map_err(Error::exporter)
+        Exporter::begin(self, schema).map_err(Error::exporter_failed)
     }
 
     fn export(&mut self, phase: &PhaseInfo, sources: &[SourceMetrics<'_>]) -> Result<()> {
-        Exporter::export(self, phase, sources).map_err(Error::exporter)
+        Exporter::export(self, phase, sources).map_err(Error::exporter_failed)
     }
 
     fn flush(&mut self) -> Result<()> {
-        Exporter::flush(self).map_err(Error::exporter)
+        Exporter::flush(self).map_err(Error::exporter_failed)
     }
 
     fn finish(&mut self, summary: &Summary) -> Result<()> {
-        Exporter::finish(self, summary).map_err(Error::exporter)
+        Exporter::finish(self, summary).map_err(Error::exporter_failed)
     }
 }

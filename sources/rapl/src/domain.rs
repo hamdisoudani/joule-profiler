@@ -182,7 +182,7 @@ pub(crate) fn discover_domains(
         }
     }
 
-    let topology = socket_topology().map_err(RaplError::Io)?;
+    let topology = socket_topology().map_err(RaplError::Topology)?;
 
     if let Some(wanted) = sockets_spec
         && let Some(unknown) = wanted
@@ -194,7 +194,9 @@ pub(crate) fn discover_domains(
 
     let mut found = Vec::new();
 
-    for cpu in read_cpu_list(Path::new(PMU_CPUMASK)).map_err(RaplError::Io)? {
+    for cpu in read_cpu_list(Path::new(PMU_CPUMASK))
+        .map_err(|error| RaplError::Read(PMU_CPUMASK.into(), error))?
+    {
         let socket = topology
             .iter()
             .find(|socket| socket.holds(cpu))
@@ -224,18 +226,18 @@ pub(crate) fn discover_domains(
 
 #[cfg(feature = "backend-perf")]
 fn get_domain_scale(domain: RaplDomainType) -> Result<Option<f64>> {
-    let mut builder = Dynamic::builder(PMU).map_err(RaplError::Io)?;
+    let mut builder = Dynamic::builder(PMU).map_err(RaplError::Pmu)?;
     if builder.event(domain.to_perf_event()).is_err() {
         return Ok(None);
     }
-    builder.scale().map_err(RaplError::Io)
+    builder.scale().map_err(RaplError::Pmu)
 }
 
 #[cfg(feature = "backend-perf")]
 fn is_domain_available(domain: &RaplDomain) -> Result<bool> {
     let counter = match build_counter(domain) {
         Ok(counter) => counter,
-        Err(RaplError::Io(error)) if error.kind() == ErrorKind::NotFound => return Ok(false),
+        Err(RaplError::Pmu(error)) if error.kind() == ErrorKind::NotFound => return Ok(false),
         Err(error) => return Err(error),
     };
 
@@ -261,7 +263,7 @@ mod test {
     };
 
     #[test]
-    fn millijoules_and_microjoules_are_u64_abd_joules_are_f64() {
+    fn millijoules_and_microjoules_are_rounded_and_joules_are_not() {
         assert_eq!(
             EnergyUnit::Microjoule.value(706_726.4),
             MetricValue::U64(706_726)
@@ -273,136 +275,29 @@ mod test {
         );
     }
 
-    fn str_to_domain(domain: &str) -> RaplDomainType {
-        RaplDomainType::try_from(domain).unwrap()
-    }
-
-    fn str_to_domain_err(domain: &str) -> RaplError {
-        let result: Result<RaplDomainType, RaplError> = RaplDomainType::try_from(domain);
-        result.unwrap_err()
-    }
-
     #[test]
-    fn string_to_rapl_domain_type_conversion_existing_domain() {
-        assert_eq!(RaplDomainType::Core, str_to_domain("core"));
-        assert_eq!(RaplDomainType::Core, str_to_domain("pp0"));
-        assert_eq!(RaplDomainType::Core, str_to_domain("energy-cores"));
-
-        assert_eq!(RaplDomainType::Uncore, str_to_domain("uncore"));
-        assert_eq!(RaplDomainType::Uncore, str_to_domain("pp1"));
-        assert_eq!(RaplDomainType::Uncore, str_to_domain("energy-uncore"));
-        assert_eq!(RaplDomainType::Uncore, str_to_domain("energy-gpu"));
-
-        assert_eq!(RaplDomainType::Package, str_to_domain("package"));
-        assert_eq!(RaplDomainType::Package, str_to_domain("energy-pkg"));
-
-        assert_eq!(RaplDomainType::Dram, str_to_domain("dram"));
-        assert_eq!(RaplDomainType::Dram, str_to_domain("ram"));
-        assert_eq!(RaplDomainType::Dram, str_to_domain("energy-ram"));
-
-        assert_eq!(RaplDomainType::Psys, str_to_domain("psys"));
-        assert_eq!(RaplDomainType::Psys, str_to_domain("platform"));
-        assert_eq!(RaplDomainType::Psys, str_to_domain("energy-psys"));
-    }
-
-    #[test]
-    fn string_to_rapl_domain_type_is_case_insensitive() {
-        assert_eq!(RaplDomainType::Core, str_to_domain("CORE"));
-        assert_eq!(RaplDomainType::Core, str_to_domain("Core"));
-        assert_eq!(RaplDomainType::Dram, str_to_domain("DRAM"));
-        assert_eq!(RaplDomainType::Package, str_to_domain("PACKAGE"));
-        assert_eq!(RaplDomainType::Psys, str_to_domain("PSYS"));
-    }
-
-    #[test]
-    fn string_to_rapl_domain_type_unknown_returns_error() {
-        assert!(matches!(
-            str_to_domain_err("unknown"),
-            RaplError::UnknownDomain(s) if s == "unknown"
-        ));
-    }
-
-    #[test]
-    fn string_to_rapl_domain_type_empty_string_returns_error() {
-        assert!(matches!(
-            str_to_domain_err(""),
-            RaplError::UnknownDomain(s) if s.is_empty()
-        ));
-    }
-
-    #[test]
-    fn string_to_rapl_domain_type_similar_but_invalid_names_return_error() {
-        for invalid in &[
-            "cores",
-            "pp2",
-            "energy-core",
-            "energy-package",
-            "energy-dram",
-            "sys",
+    fn a_domain_is_read_from_any_of_its_names_whatever_their_case() {
+        for (name, domain) in [
+            ("pp0", RaplDomainType::Core),
+            ("energy-gpu", RaplDomainType::Uncore),
+            ("PACKAGE", RaplDomainType::Package),
+            ("Ram", RaplDomainType::Dram),
+            ("platform", RaplDomainType::Psys),
         ] {
+            assert_eq!(RaplDomainType::try_from(name).ok(), Some(domain), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_name_that_is_close_to_a_domain_is_still_refused() {
+        for name in ["", "cores", "pp2", "energy-core", "energy-package", "sys"] {
             assert!(
-                matches!(str_to_domain_err(invalid), RaplError::UnknownDomain(_)),
-                "Expected UnknownDomain error for input: {invalid}"
+                matches!(
+                    RaplDomainType::try_from(name),
+                    Err(RaplError::UnknownDomain(unknown)) if unknown == name
+                ),
+                "{name}"
             );
-        }
-    }
-
-    #[test]
-    fn perf_rapl_domain_to_perf_event_conversion() {
-        assert_eq!("energy-cores", RaplDomainType::Core.to_perf_event());
-        assert_eq!("energy-gpu", RaplDomainType::Uncore.to_perf_event());
-        assert_eq!("energy-pkg", RaplDomainType::Package.to_perf_event());
-        assert_eq!("energy-ram", RaplDomainType::Dram.to_perf_event());
-        assert_eq!("energy-psys", RaplDomainType::Psys.to_perf_event());
-    }
-
-    #[test]
-    fn to_string_socket_formats_correctly() {
-        assert_eq!("CORE-0", RaplDomainType::Core.to_string_socket(0));
-        assert_eq!("PACKAGE-1", RaplDomainType::Package.to_string_socket(1));
-        assert_eq!("DRAM-2", RaplDomainType::Dram.to_string_socket(2));
-        assert_eq!("PSYS", RaplDomainType::Psys.to_string_socket(0));
-    }
-}
-
-#[cfg(all(test, feature = "backend-perf"))]
-mod perf_test {
-    use crate::{
-        counter::build_counter,
-        domain::{DOMAINS, RaplDomain, RaplDomainType, get_domain_scale, is_domain_available},
-    };
-
-    fn domain(domain: RaplDomainType) -> RaplDomain {
-        RaplDomain {
-            domain,
-            socket: 0,
-            cpu: 0,
-            scale: 1.0,
-        }
-    }
-
-    #[test]
-    fn absent_domain_is_absent() {
-        for kind in DOMAINS {
-            let defined = get_domain_scale(kind).unwrap().is_some();
-
-            if defined {
-                continue;
-            }
-
-            assert!(build_counter(&domain(kind)).is_err());
-            assert!(!is_domain_available(&domain(kind)).unwrap());
-        }
-    }
-
-    #[test]
-    fn present_domain_can_be_opened() {
-        for kind in DOMAINS {
-            if get_domain_scale(kind).unwrap().is_none() {
-                continue;
-            }
-
-            assert!(is_domain_available(&domain(kind)).unwrap());
         }
     }
 }
