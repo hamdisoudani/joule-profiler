@@ -42,6 +42,7 @@ impl<'a> SourceMetrics<'a> {
         let metric = |info: &'a MetricInfo| Metric {
             name: &info.name,
             // values are filled with blank values for now, used to optimise memory allocations
+            // the amount of metrics provided at each phase is checked so the default value is not an issue
             value: MetricValue::U64(0),
             unit: info.unit,
         };
