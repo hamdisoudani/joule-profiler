@@ -5,7 +5,8 @@ members = [
     "cli",
     "sources/*",
     "injectors/*",
-    "exporters/*"
+    "exporters/*",
+    "examples/library_usage"
 ]
 
 [workspace.package]

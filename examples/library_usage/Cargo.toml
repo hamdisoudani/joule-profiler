@@ -6,11 +6,14 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 readme.workspace = true
+publish = false
 
 [dependencies]
 anyhow = "1.0.102"
-joule-profiler-core = { version = "1.0.2", path = "../../core" }
-joule-profiler-source-rapl = { version = "1.0.2", path = "../../sources/rapl" }
+joule-profiler-core = { path = "../../core" }
+joule-profiler-source-rapl = { path = "../../sources/rapl" }
+joule-profiler-injector-stdout = { path = "../../injectors/stdout" }
+joule-profiler-exporter-terminal = { path = "../../exporters/terminal" }
 
 [lints]
 workspace = true

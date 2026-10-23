@@ -1,35 +1,34 @@
 //! This file provides a simple example of the Joule Profiler library usage.
 
-use std::time::Duration;
-
 use anyhow::Result;
-use joule_profiler_core::JouleProfiler;
-use joule_profiler_core::config::ProfileConfig;
-use joule_profiler_source_rapl::perf;
+use joule_profiler_core::profiler::JouleProfiler;
+use joule_profiler_exporter_terminal::TerminalExporter;
+use joule_profiler_injector_stdout::StdoutInjector;
+use joule_profiler_source_rapl::Rapl;
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    // Instanciate Joule Profiler.
+fn main() -> Result<()> {
+    // Instantiate Joule Profiler.
     let mut profiler = JouleProfiler::new();
 
     // Add sources.
-    let rapl = perf::Rapl::new(None)?;
-    profiler.add_source(rapl);
+    profiler.add_source(Rapl::new().build()?);
     // ...
 
-    // Profile config.
-    let profile_config = ProfileConfig {
-        stdout_file: None,
-        cmd: vec!["sleep".into(), "1".into()],
-        token_pattern: "__[A-Z0-9_]+__".into(),
-        use_root: false,
-        init_timeout: Duration::from_secs(1),
-    };
+    // Run the command, and start a new phase each time it prints a token.
+    let command = "echo __WORK_START__; sleep 1; echo __WORK_END__; sleep 0.5";
+    let injector = StdoutInjector::new(
+        vec!["sh".into(), "-c".into(), command.into()],
+        "__[A-Z0-9_]+__",
+    )?;
+    profiler.set_injector(injector);
+
+    // Print each phase in the terminal.
+    profiler.set_exporter(TerminalExporter::default());
 
     // Launch profiling.
-    let results = profiler.profile(&profile_config).await?;
+    let summary = profiler.profile()?;
 
-    println!("{results:#?}");
+    println!("{summary:#?}");
 
     Ok(())
 }
