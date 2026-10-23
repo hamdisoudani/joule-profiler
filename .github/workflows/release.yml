@@ -48,11 +48,16 @@ jobs:
           fi
 
     outputs:
+      releases_created: ${{ steps.release.outputs.releases_created }}
       cli_released: ${{ steps.parse.outputs.cli_released }}
       tag_name: ${{ steps.parse.outputs.tag_name }}
 
   release-plz-pr:
     name: Release-plz PR
+    # Runs after the release so it sees the new tags, and not at all on the push that merges a
+    # release PR, otherwise it opens a new PR for versions that were just published.
+    needs: release-plz-release
+    if: needs.release-plz-release.outputs.releases_created != 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
