@@ -2,7 +2,7 @@
 
 AMD SMI metric source for [Joule Profiler](https://github.com/joule-profiler/joule-profiler).
 
-This crate implements `MetricSource` from `joule-profiler-core` and measures AMD GPU energy counters via the **AMD System Management Interface** library. It also tracks VRAM usage and GPU utilization at a fixed configurable polling interval.
+This crate builds a `Source` for `joule-profiler-core` that measures AMD GPU energy counters via the **AMD System Management Interface** library. It also tracks VRAM usage and GPU utilization at a configurable polling interval.
 
 ## What is AMD SMI?
 
@@ -19,10 +19,21 @@ When a device supports direct energy accumulation registers, the source reads th
 | `GPU-{uuid}-energy` | µJ | Energy consumed between two measurements |
 | `GPU-{uuid}-vram_min` | Bytes | Minimum VRAM usage observed during the interval |
 | `GPU-{uuid}-vram_max` | Bytes | Maximum VRAM usage observed during the interval |
+| `GPU-{uuid}-vram_avg` | Bytes | Average VRAM usage observed during the interval |
 | `GPU-{uuid}-utilization_min` | % | Minimum GPU utilization observed during the interval |
 | `GPU-{uuid}-utilization_max` | % | Maximum GPU utilization observed during the interval |
+| `GPU-{uuid}-utilization_avg` | % | Average GPU utilization observed during the interval |
 
-> Available metrics depend on device support. VRAM and utilization require a polling interval to be configured.
+> Available metrics depend on device support. By default (`minimal = true`) only the energy is reported, set `minimal = false` to also poll VRAM and utilization.
+
+## Configuration
+
+```toml
+[sources.amdsmi]
+gpus = ["GPU-00000000-0000-0000-0000-000000000000"] # device UUIDs, omit for every GPU
+minimal = true         # the default, energy only, without VRAM and utilization
+poll_interval = "20ms" # the default
+```
 
 ## Requirements
 

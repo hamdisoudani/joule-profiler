@@ -2,20 +2,43 @@
 
 Cgroup v2 metric source for [joule-profiler](https://github.com/joule-profiler/joule-profiler).
 
-This crate implements a `MetricReader` from `joule-profiler-core` and collects **process-level** and **system-wide** metrics using Linux **cgroup v2** interfaces.
+This crate builds a `Source` for `joule-profiler-core` that collects **process-level** and, optionally, **system-wide** metrics using Linux **cgroup v2** interfaces.
 
 Control groups (cgroups v2) are a Linux kernel feature that allows grouping processes and tracking/limiting their resource usage.
 This source uses cgroup files exposed under `/sys/fs/cgroup`.
 
-## Setup
+## Which cgroup is measured
 
-Before using this source, the required cgroup controllers `cpu`, `memory`, `io` must be enabled on the cgroup hierarchy. This source does **not** enables them automatically, it is your responsibility to ensure controllers are active.
+### The cgroup made for the run
 
-To enable them on the root cgroup:
+When `[sources.cgroup]` names no cgroup, Joule Profiler makes one for the run, moves the profiled program into it, and measures it. It is configured with the top-level `[cgroup]` table, whose keys are all optional:
 
-```bash
-echo "+cpu +memory +io" | sudo tee /sys/fs/cgroup/cgroup.subtree_control
+```toml
+[cgroup]
+parent = "/sys/fs/cgroup"
+name = "joule-profiler-run"           # default: joule-profiler-<pid>
+controllers = ["cpu", "memory", "io"] # the default
+attach = true                         # moves the program into it
+freeze = false                        # frozen before the program starts, thawed once the sources are ready
 ```
+
+The controllers are enabled on `parent` if they are not already. A controller of the default list that cannot be enabled is left out with a warning, while one listed in `controllers` stops the run. A cgroup Joule Profiler created is removed after the run, and the controllers it enabled are disabled again. A cgroup that already exists is used as is and kept.
+
+Making it needs write access to the parent: root, or a delegated subtree (e.g. a systemd user session).
+
+### An existing cgroup
+
+To measure a cgroup that already exists instead, name it in the source table. No cgroup is then made for the run, unless a `[cgroup]` table is given.
+
+```toml
+[sources.cgroup]
+name = "my.slice"       # relative to `root`, use "parent/child" for a nested cgroup
+#root = "/sys/fs/cgroup" # the default
+#poll_interval = "10ms"  # the default
+#global = false          # also reports the root cgroup
+```
+
+The controllers `cpu`, `memory` and `io` must then be enabled on its parent, which Joule Profiler does **not** do for an existing cgroup. A metric whose controller is missing is not reported.
 
 To verify which controllers are currently enabled:
 
@@ -36,21 +59,8 @@ echo "+cpu +memory +io" | sudo tee /sys/fs/cgroup/cgroup.subtree_control
 echo "+cpu +memory +io" | sudo tee /sys/fs/cgroup/nested_cgroup/cgroup.subtree_control
 ```
 
-> [!IMPORTANT]
-> By default, a nested cgroup inherit its parent controllers files. Nonetheless, the parent of the nested cgroup must enable the controllers.
-
 > [!NOTE]
 > On systemd-based systems, some controllers may already be enabled. Check `/sys/fs/cgroup/cgroup.subtree_control` first.
-
-### Manual cgroup creation / process attachment
-
-Alternatively, you can configure the source to not create the cgroup or not attach the pid to the configured cgroup with the `create_cgroup` and `attach_pid` options in the config.
-
-To create a cgroup, do:
-
-```bash
-sudo mkdir /sys/fs/cgroup/{your_cgroup_path}
-```
 
 You can also create a cgroup slice using systemd to be able to spawn processes directly in it:
 ```bash
@@ -71,30 +81,31 @@ After that you can use systemd to spawn a process directly in your slice:
 systemd-run --scope --slice={your_slice_name} {your_command}
 ```
 
-By configuring the cgroup source with `create_cgroup` and `attach_pid` to false, Joule Profiler will be able to profile the process directly at spawn.
-This configuration can also benefits to the `perf_event` source. See [perf_event](../perf_event/README.md) source documentation for further information.
+The slice can then be named in `[sources.cgroup]`, and in `[sources.perf_event]` with `scope = "cgroup"`. See [perf_event](../perf_event/README.md) source documentation for further information.
 
 ## Implemented metrics
 
-All metrics are reported for both the process cgroup and the root cgroup, thus they are prefixed with a `proc` or a `global`.
+The metrics of the measured cgroup are prefixed with `proc`. With `global = true`, the same metrics are also reported for the root cgroup, prefixed with `global`.
 
-Here is the list of the metrics implemented.
+The metrics reported depend on the controllers of the cgroup. Here is the list of the metrics implemented.
 
 ### CPU
 
 | Metric | Description |
 | - | - |
-| `usage_usec` | Total CPU time consumed (user + kernel) |
-| `user_usec` | CPU time spent in user space |
-| `system_usec` | CPU time spent in kernel space |
+| `usage_usec` | CPU time consumed (user + kernel) during the phase |
+| `user_usec` | CPU time spent in user space during the phase |
+| `system_usec` | CPU time spent in kernel space during the phase |
 | `nr_periods` | Number of scheduling periods |
 | `nr_throttled` | Number of CPU throttling events |
-| `throttled_usec` | Total time spent throttled |
+| `throttled_usec` | Time spent throttled |
 | `nr_bursts` | Number of burst events (burstable cgroups) |
-| `burst_usec` | Total time spent in burst mode |
-| `cpu_usage` | CPU usage in percentage |
+| `burst_usec` | Time spent in burst mode |
+| `cpu_usage` | CPU usage over the phase, 100% being one full core |
 
 ### Memory
+
+Each value is polled every `poll_interval` and reported with a `_min`, `_max` and `_avg` suffix, in bytes.
 
 | Metric | Description |
 | - | - |
@@ -112,8 +123,8 @@ Here is the list of the metrics implemented.
 
 | Metric | Description |
 | - | - |
-| `read_bytes` | Total number of bytes read by the cgroup |
-| `write_bytes` | Total number of bytes written by the cgroup |
+| `read_bytes` | Bytes read by the cgroup during the phase, summed over the devices |
+| `write_bytes` | Bytes written by the cgroup during the phase, summed over the devices |
 
 ## Requirements
 

@@ -2,78 +2,75 @@
 
 Procfs metric source for [joule-profiler](https://github.com/joule-profiler/joule-profiler).
 
-This crate implements the `MetricReader` trait from `joule-profiler-core` and collects **process-level** and **system-wide** metrics using Linux **procfs** interface.
+This crate builds a `Source` for `joule-profiler-core` that collects **process-level** and, optionally, **system-wide** metrics using the Linux **procfs** interface.
 
-The implementation relies on `/proc` filesystem to read runtime information about memory and I/O activity at process and system level.
-
-To do so, it uses two Tokio asynchronous background tasks:
-* one continuously polls and aggregates performance metrics.
-* the other continuously polls and rebuilds the process hierarchy.
-
-This separation allows efficient metric sampling while maintaining the overhead introduce at the lowest and rebuilding the process hierarchy efficiently.
+The implementation relies on the `/proc` filesystem to read runtime information about the memory, I/O and CPU time of the profiled program and of every process it starts.
 
 ## Architecture
 
-### Asynchronous polling
+A single polling thread:
+* reads the memory of the process tree every `process_poll_interval`, and of the machine every `poll_interval` when `global` is set;
+* lists the process tree again from the profiled program PID every `hierarchy_interval` only, since that is the costly part.
 
-* **Metrics polling task:**
-  * Periodically reads the procfs
-  * Aggregates memory and I/O metrics
-  * Maintains snapshots per process and for the whole system
+At each phase boundary, the I/O and CPU time of the process tree are read directly, and the memory is reported as the minimum, maximum and average of what the thread polled during the phase.
 
-* **Process hierarchy task:**
-  * Periodically scans `/proc`
-  * Builds a process tree from the profiled program PID.
+## Configuration
+
+```toml
+[sources.procfs]
+poll_interval = "10ms"         # the memory of the machine, when `global`
+process_poll_interval = "20ms" # the memory of the process tree
+hierarchy_interval = "1s"      # how often the process tree is listed again
+global = false                 # also reports the memory of the machine
+```
 
 ## Implemented metrics
 
-All metrics are reported for both:
-- individual processes
-- system-wide
-
-Metrics are prefixed with `proc` or `global`.
+Process metrics are prefixed with `proc`, and system-wide metrics, reported only with `global = true`, with `global`.
 
 ### Memory (process-level)
 
+Each value is reported with a `_min`, `_max` and `_avg` suffix, in bytes.
+
 | Metric | Description |
 | - | - |
-| `proc_vm_size_min` | Minimum virtual memory size observed |
-| `proc_vm_size_max` | Maximum virtual memory size observed |
-| `proc_rss_min` | Minimum resident set size |
-| `proc_rss_max` | Maximum resident set size |
-| `proc_pss_min` | Minimum proportional set size |
-| `proc_pss_max` | Maximum proportional set size |
-| `proc_shared_min` | Minimum shared memory usage |
-| `proc_shared_max` | Maximum shared memory usage |
-| `proc_anon_min` | Minimum anonymous memory usage |
-| `proc_anon_max` | Maximum anonymous memory usage |
+| `proc_vm_size` | Virtual memory size |
+| `proc_rss` | Resident set size |
+| `proc_pss` | Proportional set size |
+| `proc_shared` | Shared memory usage |
+| `proc_anon` | Anonymous memory usage |
 
 ### Memory (system-wide)
 
+Each value is reported with a `_min`, `_max` and `_avg` suffix, in bytes.
+
 | Metric | Description |
 | - | - |
-| `global_mem_used_min` | Minimum system memory usage observed |
-| `global_mem_used_max` | Maximum system memory usage observed |
-| `global_cached_min` | Minimum page cache usage |
-| `global_cached_max` | Maximum page cache usage |
-| `global_anon_min` | Minimum anonymous memory usage (system-wide) |
-| `global_anon_max` | Maximum anonymous memory usage (system-wide) |
-| `global_swap_free_min` | Minimum available swap observed |
-| `global_swap_free_max` | Maximum available swap observed |
+| `global_mem_used` | System memory usage |
+| `global_cached` | Page cache usage |
+| `global_anon` | Anonymous memory usage |
+| `global_swap_free` | Available swap |
 
 ### I/O (process-level)
 
 | Metric | Description |
 | - | - |
-| `proc_io_read_bytes` | Total bytes read by the process |
-| `proc_io_write_bytes` | Total bytes written by the process |
+| `proc_io_read_bytes` | Bytes read by the process tree during the phase |
+| `proc_io_write_bytes` | Bytes written by the process tree during the phase |
+
+### CPU (process-level)
+
+| Metric | Description |
+| - | - |
+| `proc_cpu_user` | CPU time spent in user space during the phase, in ms |
+| `proc_cpu_system` | CPU time spent in kernel space during the phase, in ms |
 
 ### Design notes
 
-* Memory metrics are tracked as time-series extrema (min/max) rather than instantaneous snapshots
-* System-wide metrics are derived from `/proc/meminfo` and aggregated process data
-* I/O metrics come from `/proc/[pid]/io`
-* Process hierarchy is rebuilt continuously to detect the most accurate bounds for each metrics
+* Memory metrics are tracked as extrema and averages over the phase rather than instantaneous snapshots
+* System-wide metrics are derived from `/proc/meminfo`
+* I/O metrics come from `/proc/[pid]/io`, CPU time from `/proc/[pid]/stat`
+* The process tree is listed again periodically to include the processes started during the run
 
 ## Requirements
 

@@ -41,7 +41,7 @@ impl<'a> SourceMetrics<'a> {
     pub(crate) fn from_schema(schema: &'a Schema) -> Vec<Self> {
         let metric = |info: &'a MetricInfo| Metric {
             name: &info.name,
-            // values are filled with blank values for now, used to optimise memory allocations
+            // Placeholder, overwritten by `fill_values` before every export.
             // the amount of metrics provided at each phase is checked so the default value is not an issue
             value: MetricValue::U64(0),
             unit: info.unit,

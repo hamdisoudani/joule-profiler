@@ -15,7 +15,8 @@ pub use sensor::{ProcfsSensor, Snapshot};
 use crate::error::Result;
 
 const MACHINE_POLL: Duration = Duration::from_millis(10);
-const PROCESS_POLL: Duration = Duration::from_millis(10);
+// Slower than the machine: `smaps_rollup` walks the page tables of every process of the tree.
+const PROCESS_POLL: Duration = Duration::from_millis(20);
 const HIERARCHY: Duration = Duration::from_secs(1);
 
 /// Memory, CPU time and I/O of the profiled process tree, from `/proc`. Both the builder and the

@@ -54,8 +54,6 @@ jobs:
 
   release-plz-pr:
     name: Release-plz PR
-    # Runs after the release so it sees the new tags, and not at all on the push that merges a
-    # release PR, otherwise it opens a new PR for versions that were just published.
     needs: release-plz-release
     if: needs.release-plz-release.outputs.releases_created != 'true'
     runs-on: ubuntu-latest
